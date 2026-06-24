@@ -135,7 +135,7 @@ pub const logger = struct {
             });
             return err;
         };
-        std.log.scoped(.wing).info("{s} {s} ({f})", .{
+        std.log.scoped(.wing).debug("{s} {s} ({f})", .{
             @tagName(ctx.req.method()),
             target,
             stopwatch.read(),
