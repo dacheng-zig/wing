@@ -1,4 +1,4 @@
-//! wing framework demo (M2 acceptance: "框架 demo 完整").
+//! wing framework demo.
 //!
 //! Shows the full first-phase surface: Router composition (nest/merge),
 //! typed extractors (Path/Query/Json + state projection), toResponse
@@ -11,14 +11,14 @@
 //!       curl 'http://127.0.0.1:8080/api/v1/users?page=2&q=ada'
 //!       curl -X POST http://127.0.0.1:8080/api/v1/users -d '{"name":"grace"}'
 //!       curl -X DELETE http://127.0.0.1:8080/api/v1/users   # 405 + Allow
-//!       curl http://127.0.0.1:8080/assets/design/wing-architecture.md
+//!       curl http://127.0.0.1:8080/assets/user-guide.md
 
 const std = @import("std");
 const zio = @import("zio");
 const talon = @import("talon");
 const wing = @import("wing");
 
-// ── State (explicit, no DI container — design doc §8) ───────────────────
+// ── State (explicit, no DI container) ───────────────────────────────────
 
 const Db = struct {
     next_id: u64 = 1,
@@ -41,7 +41,7 @@ const User = struct { id: u64, name: []const u8 };
 const CreateUserReq = struct { name: []const u8 };
 const UserQuery = struct { page: u32 = 1, q: ?[]const u8 };
 
-// ── Handlers (§7: typed signatures, comptime-bound) ──────────────────────
+// ── Handlers (typed signatures, comptime-bound) ──────────────────────────
 
 fn home(ctx: *Ctx, cfg: *Config) anyerror![]const u8 {
     _ = ctx;
@@ -103,14 +103,14 @@ const App = wing.App(State, .{
 });
 
 fn buildRouter(gpa: std.mem.Allocator) !wing.Router(State) {
-    // Sub-router, mounted under a prefix (§5 nest).
+    // Sub-router, mounted under a prefix (nest).
     var users = wing.Router(State).init(gpa);
     errdefer users.deinit();
     try users.get("/:id", getUser);
     try users.get("/", listUsers);
     try users.post("/", createUser);
 
-    // Flat-merged sibling (§5 merge).
+    // Flat-merged sibling (merge).
     var ops = wing.Router(State).init(gpa);
     errdefer ops.deinit();
     try ops.get("/health", health);
@@ -120,7 +120,7 @@ fn buildRouter(gpa: std.mem.Allocator) !wing.Router(State) {
     try root.get("/", home);
     try root.get("/legacy", legacy);
     try root.get("/assets/*path", wing.static(State, "docs"));
-    // Per-route metadata (§6): cors policy + auth requirement + guard.
+    // Per-route metadata: cors policy + auth requirement + guard.
     try root.add(.GET, "/admin", adminPanel, .{
         .name = "admin-panel",
         .auth = .{ .role = "admin" },

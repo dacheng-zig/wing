@@ -1,13 +1,13 @@
-//! Built-in request-level middleware (design doc §9).
+//! Built-in request-level middleware.
 //!
 //! All middlewares are generic over the context type (anytype ctx), so one
 //! definition serves every `Context(State)` instantiation — the comptime
-//! version of tower's ecosystem effect (§7).
+//! version of tower's ecosystem effect.
 //!
-//! First-phase set: recover, logger, request_id, route_match/execute (§6
-//! standard pieces), cors, static (file-reading version; switches to talon
+//! First-phase set: recover, logger, request_id, route_match/execute,
+//! cors, static (file-reading version; switches to talon
 //! sendFile when the engine grows it). Deferred: timeout (needs an
-//! engine-level deadline primitive to be race-free), compress (M3 per §13).
+//! engine-level deadline primitive to be race-free), compress (M3).
 
 const std = @import("std");
 const talon = @import("talon");
@@ -15,10 +15,10 @@ const zio = @import("zio");
 const context_mod = @import("context.zig");
 
 /// Capability provided by `route_match`, required by metadata-reading
-/// middleware — ordering mistakes become compile errors (§6, talon §7).
+/// middleware — ordering mistakes become compile errors.
 pub const RouteMatched = struct {};
 
-// ── Two-phase routing standard pieces (§6) ───────────────────────────────
+// ── Two-phase routing standard pieces ────────────────────────────────────
 
 /// Route match as a chain middleware: later middleware see *what will run*
 /// (ctx.endpoint + metadata) before it runs. Unmatched requests short-
@@ -65,7 +65,7 @@ pub const route_match = struct {
     }
 };
 
-/// The chain terminal (§6 `execute`): invokes the matched endpoint thunk.
+/// The chain terminal (`execute`): invokes the matched endpoint thunk.
 /// Returns the typed terminal fn for `Context(State)`.
 pub fn executeTerminal(comptime State: type) fn (*context_mod.Context(State)) anyerror!void {
     return struct {
@@ -80,7 +80,7 @@ pub fn executeTerminal(comptime State: type) fn (*context_mod.Context(State)) an
     }.execute;
 }
 
-// ── Error boundary (§9 recover) ──────────────────────────────────────────
+// ── Error boundary (recover) ─────────────────────────────────────────────
 
 /// Error boundary with a custom error→status mapping.
 pub fn recoverWith(comptime mapper: fn (anyerror) talon.http.Status) type {
@@ -120,7 +120,7 @@ pub fn defaultErrorStatus(err: anyerror) talon.http.Status {
     };
 }
 
-// ── Observability (§9 logger, request_id) ────────────────────────────────
+// ── Observability (logger, request_id) ───────────────────────────────────
 
 pub const logger = struct {
     pub fn run(ctx: anytype, next: anytype) anyerror!void {
@@ -157,7 +157,7 @@ pub const request_id = struct {
     }
 };
 
-// ── CORS (§9, metadata-driven per §6) ────────────────────────────────────
+// ── CORS (metadata-driven) ───────────────────────────────────────────────
 
 /// Reads the per-route `metadata.cors` policy. Preflights (OPTIONS +
 /// Access-Control-Request-Method) are answered for the *target* method's
@@ -205,7 +205,7 @@ pub const cors = struct {
     }
 };
 
-// ── Static files (§9) ────────────────────────────────────────────────────
+// ── Static files ─────────────────────────────────────────────────────────
 
 /// Returns a *handler* serving files from `root_dir`; mount it on a
 /// wildcard route: `router.get("/assets/*path", wing.static(State, "www"))`.

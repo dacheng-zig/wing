@@ -1,4 +1,4 @@
-//! TestClient (design doc §10): full-stack in-process testing over talon's
+//! TestClient: full-stack in-process testing over talon's
 //! MemoryListener — no sockets, no ports, parallel-safe.
 //!
 //! Every request runs the real chain: parser → middleware → routing →

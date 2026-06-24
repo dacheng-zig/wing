@@ -1,4 +1,4 @@
-//! Extractors and response conversion (design doc §7).
+//! Extractors and response conversion.
 //!
 //! `bind` digests a typed handler signature at comptime into the uniform
 //! thunk stored in the route tree. Extractor contracts (comptime duck
@@ -7,7 +7,7 @@
 //!   - `fromRequest(ctx) !Self`      — consumes the body; at most one and
 //!                                     it must be the last parameter.
 //! Violations are @compileErrors at the registration site, naming the
-//! parameter position and the reason — the DX bar this design sets (§7).
+//! parameter position and the reason — the DX bar this design sets.
 //!
 //! Response side: a handler's return value answers via `toResponse(ctx)`
 //! duck typing; `[]const u8` and `void` are accepted directly. Errors
@@ -181,7 +181,7 @@ fn jsonStringifyArena(arena: std.mem.Allocator, value: anytype) ![]const u8 {
 
 // ── Built-in extractors / responders ─────────────────────────────────────
 
-/// JSON in both directions (§7): as a parameter it consumes and parses the
+/// JSON in both directions: as a parameter it consumes and parses the
 /// request body (fromRequest); as a return type it serializes with 200.
 pub fn Json(comptime T: type) type {
     return struct {
@@ -208,7 +208,7 @@ pub fn Json(comptime T: type) type {
     };
 }
 
-/// 201 Created with a JSON body and optional Location header (§7).
+/// 201 Created with a JSON body and optional Location header.
 pub fn Created(comptime T: type) type {
     return struct {
         value: T,

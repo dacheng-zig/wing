@@ -1,9 +1,9 @@
 //! App adapter: makes a wing Router consumable by talon's `Server(App)`
-//! contract (design doc §2 item 1).
+//! contract.
 //!
 //! `handle` builds the per-request Context and runs the request-level
-//! middleware chain (talon `chain` reused per §2 item 5); the terminal
-//! invokes the matched endpoint's thunk (§6 `execute`).
+//! middleware chain (talon `chain` reused); the terminal
+//! invokes the matched endpoint's thunk (`execute`).
 
 const talon = @import("talon");
 const context_mod = @import("context.zig");
@@ -12,7 +12,7 @@ const middleware = @import("middleware.zig");
 
 /// `middlewares` is the request-level chain tuple, e.g.
 /// `.{ wing.middleware.logger, wing.middleware.recover, wing.middleware.route_match, wing.middleware.cors }`.
-/// The `execute` terminal (§6) is appended automatically.
+/// The `execute` terminal is appended automatically.
 pub fn App(comptime State: type, comptime middlewares: anytype) type {
     return struct {
         const Self = @This();
@@ -40,7 +40,7 @@ pub fn App(comptime State: type, comptime middlewares: anytype) type {
     };
 }
 
-/// Router + standard chain, the common case (§14 mitigation: a ready-made
+/// Router + standard chain, the common case (a ready-made
 /// specialization so users don't assemble the comptime stack by hand).
 pub fn DefaultApp(comptime State: type) type {
     return App(State, .{

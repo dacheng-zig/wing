@@ -1,8 +1,8 @@
-//! wing: web framework on top of the talon engine (design doc §1).
+//! wing: web framework on top of the talon engine.
 //!
 //! Routing, middleware, Context, extractors, testability — DX-first but
 //! zero-cost: all framework magic is digested at comptime, no runtime
-//! reflection or lookups. Consumes only talon's public contract (§2).
+//! reflection or lookups. Consumes only talon's public contract.
 
 const std = @import("std");
 
@@ -51,7 +51,7 @@ test {
 }
 
 test "wing imports talon public contract" {
-    // Pin the dependency surface (design doc §2).
+    // Pin the dependency surface.
     _ = talon.http.Server;
     _ = talon.http.Request;
     _ = talon.http.Response;

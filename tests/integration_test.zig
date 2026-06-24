@@ -1,6 +1,5 @@
 //! Full-stack integration tests: TestClient → talon MemoryListener →
-//! wing chain → routing → extractors → response encoding (M2 acceptance:
-//! "TestClient 跑全部框架测试").
+//! wing chain → routing → extractors → response encoding.
 
 const std = @import("std");
 const talon = @import("talon");

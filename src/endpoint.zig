@@ -1,4 +1,4 @@
-//! Endpoint + Metadata: two-phase routing artifacts (design doc §6).
+//! Endpoint + Metadata: two-phase routing artifacts.
 //!
 //! Route match produces an Endpoint; downstream middleware (cors, auth,
 //! rate limit) read its metadata to apply per-route policy — cross-cutting
@@ -9,11 +9,11 @@ const std = @import("std");
 const talon = @import("talon");
 const zio = @import("zio");
 
-/// Uniform handler thunk: the only dynamic dispatch point in wing (§7).
+/// Uniform handler thunk: the only dynamic dispatch point in wing.
 /// The opaque pointer is `*Context(State)`; binding logic is comptime-baked.
 pub const Handler = *const fn (*anyopaque) anyerror!void;
 
-/// Route predicate beyond method/path (actix Guard, §6). Runs during the
+/// Route predicate beyond method/path (actix Guard). Runs during the
 /// match phase; returning false makes the lookup continue as if the route
 /// did not exist.
 pub const Guard = *const fn (req: *const talon.http.Request) bool;
@@ -23,7 +23,7 @@ pub const Endpoint = struct {
     metadata: Metadata,
 };
 
-/// Static per-route policy data, read by metadata-driven middleware (§6).
+/// Static per-route policy data, read by metadata-driven middleware.
 /// Constructed at registration; never mutated afterwards.
 pub const Metadata = struct {
     name: []const u8 = "",
@@ -68,7 +68,7 @@ pub const RouteOptions = struct {
     }
 };
 
-/// Guard factory: matches when the request Host header equals `host` (§6).
+/// Guard factory: matches when the request Host header equals `host`.
 pub fn hostIs(comptime host: []const u8) Guard {
     return struct {
         fn check(req: *const talon.http.Request) bool {

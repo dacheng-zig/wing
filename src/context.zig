@@ -1,4 +1,4 @@
-//! Request Context (design doc §4).
+//! Request Context.
 //!
 //! One Context per request, stack-allocated by the wing App adapter. All
 //! slices (params, request_id) borrow per-request storage; lifetime is the
@@ -12,7 +12,7 @@ const router_mod = @import("router.zig");
 pub const max_path_params = 16;
 
 /// Zero-allocation path parameter storage: slices borrow the URL buffer of
-/// the current request (§5).
+/// the current request.
 pub const PathParams = struct {
     names: [max_path_params][]const u8 = undefined,
     values: [max_path_params][]const u8 = undefined,
@@ -40,7 +40,7 @@ pub fn Context(comptime State: type) type {
         /// Request-level arena (talon-managed, reset between requests).
         arena: std.mem.Allocator,
         state: *State,
-        /// Filled by route_match (§6); null until then or when unmatched.
+        /// Filled by route_match; null until then or when unmatched.
         endpoint: ?*const endpoint_mod.Endpoint = null,
         params: PathParams = .{},
         /// Set by the request_id middleware; borrows request storage.
@@ -49,7 +49,7 @@ pub fn Context(comptime State: type) type {
         /// the response by `respond`. talon writes the head exactly once, so
         /// post-hoc injection needs this indirection. Arena-backed.
         extra_headers: std.ArrayList(talon.http.Header) = .empty,
-        /// Needed by route_match; not part of the user-facing contract (§4).
+        /// Needed by route_match; not part of the user-facing contract.
         router: *const router_mod.Router(State),
 
         pub const WingState = State;

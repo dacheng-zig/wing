@@ -1,4 +1,4 @@
-//! M2 acceptance (design doc §11): steady-state request handling performs
+//! M2 acceptance: steady-state request handling performs
 //! zero heap allocation from the server gpa — all per-request temporaries
 //! live in talon's retained-capacity arena.
 //!

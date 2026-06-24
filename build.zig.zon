@@ -4,7 +4,7 @@
     .fingerprint = 0xb8020544bd47cbc5, // Changing this has security and trust implications.
     .minimum_zig_version = "0.16.0",
     .dependencies = .{
-        // Local path during two-repo co-development (design doc §2); switch to
+        // Local path during two-repo co-development; switch to
         // a pinned url+hash once talon publishes tagged releases.
         .talon = .{
             .path = "../talon",

@@ -1,5 +1,4 @@
-//! Router: segment-granularity radix tree with value-semantic composition
-//! (design doc §5).
+//! Router: segment-granularity radix tree with value-semantic composition.
 //!
 //! - One tree per HTTP method; lookup is zero-allocation, path parameters
 //!   borrow the URL buffer.
@@ -9,7 +8,7 @@
 //! - `nest`/`merge` are startup-time tree grafts with move semantics: the
 //!   source router is left empty (safe to deinit), endpoints transfer
 //!   ownership. Conflicts are registration-time errors, never silent.
-//! - Guards (§6) hang on tree entries; a failing guard continues the match
+//! - Guards hang on tree entries; a failing guard continues the match
 //!   as if the route did not exist.
 
 const std = @import("std");
@@ -97,7 +96,7 @@ pub fn Router(comptime State: type) type {
         // ── Registration ────────────────────────────────────────────────
 
         /// Full registration form: method + path + typed handler + options
-        /// (metadata §6 + guard). Binding happens here at comptime.
+        /// (metadata + guard). Binding happens here at comptime.
         pub fn add(
             self: *Self,
             method: talon.http.Method,
@@ -128,7 +127,7 @@ pub fn Router(comptime State: type) type {
             try self.add(.PATCH, path, handler, .{});
         }
 
-        /// Unmatched-request terminal (§5). Replaces any previous fallback.
+        /// Unmatched-request terminal. Replaces any previous fallback.
         pub fn fallback(self: *Self, comptime handler: anytype) void {
             self.fallback_handler = extract.bind(State, handler);
         }
@@ -220,7 +219,7 @@ pub fn Router(comptime State: type) type {
             }
         }
 
-        // ── Composition (§5) ────────────────────────────────────────────
+        // ── Composition ─────────────────────────────────────────────────
 
         /// Mounts `other` under `prefix` (sub-router "/" maps to the prefix
         /// itself). Move semantics: `other` ends up empty.
@@ -301,7 +300,7 @@ pub fn Router(comptime State: type) type {
             }
         }
 
-        // ── Matching (§5, §6) ───────────────────────────────────────────
+        // ── Matching ────────────────────────────────────────────────────
 
         /// Zero-allocation lookup. `params` slices borrow `path`'s buffer.
         /// Guarded entries consult `req`; a failing guard continues matching.
@@ -363,7 +362,7 @@ pub fn Router(comptime State: type) type {
             return null;
         }
 
-        /// Methods that would match `path`: powers automatic 405 + Allow (§5).
+        /// Methods that would match `path`: powers automatic 405 + Allow.
         pub fn allowedMethods(
             self: *const Self,
             path: []const u8,

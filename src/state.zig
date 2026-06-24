@@ -1,4 +1,4 @@
-//! Sub-state projection (design doc §8, axum FromRef equivalent).
+//! Sub-state projection (axum FromRef equivalent).
 //!
 //! A handler parameter `db: *Db` projects the unique `Db`-typed field out of
 //! the App State at comptime — plain field traversal, no runtime container.
