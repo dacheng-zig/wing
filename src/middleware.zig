@@ -112,6 +112,8 @@ pub fn defaultErrorStatus(err: anyerror) talon.http.Status {
         error.MissingPathParam,
         error.InvalidPathParam,
         error.InvalidJsonBody,
+        error.MissingCookie,
+        error.InvalidCookie,
         => .bad_request,
         error.NotFound => .not_found,
         error.Unauthorized => .unauthorized,

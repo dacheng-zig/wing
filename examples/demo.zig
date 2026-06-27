@@ -12,6 +12,8 @@
 //!       curl -X POST http://127.0.0.1:8080/api/v1/users -d '{"name":"grace"}'
 //!       curl -X DELETE http://127.0.0.1:8080/api/v1/users   # 405 + Allow
 //!       curl http://127.0.0.1:8080/assets/user-guide.md
+//!       curl -i 'http://127.0.0.1:8080/theme/set?theme=light'  # Set-Cookie
+//!       curl --cookie 'theme=light' http://127.0.0.1:8080/theme
 
 const std = @import("std");
 const zio = @import("zio");
@@ -84,6 +86,23 @@ fn health(ctx: *Ctx) anyerror![]const u8 {
     return "ok\n";
 }
 
+// Cookie component: write a hardened session cookie, read it back.
+fn setTheme(ctx: *Ctx, q: wing.Query(struct { theme: []const u8 = "dark" })) anyerror![]const u8 {
+    try ctx.setCookie(.{
+        .name = "theme",
+        .value = q.value.theme,
+        .path = "/",
+        .max_age = 7 * 24 * 3600,
+        .http_only = true,
+        .same_site = .lax,
+    });
+    return "theme saved\n";
+}
+
+fn readTheme(ctx: *Ctx) anyerror![]const u8 {
+    return std.fmt.allocPrint(ctx.arena, "theme={s}\n", .{ctx.cookie("theme") orelse "<unset>"});
+}
+
 fn adminPanel(ctx: *Ctx) anyerror![]const u8 {
     return std.fmt.allocPrint(ctx.arena, "admin panel (request {s})\n", .{ctx.request_id});
 }
@@ -114,6 +133,8 @@ fn buildRouter(gpa: std.mem.Allocator) !wing.Router(State) {
     var ops = wing.Router(State).init(gpa);
     errdefer ops.deinit();
     try ops.get("/health", health);
+    try ops.get("/theme", readTheme);
+    try ops.get("/theme/set", setTheme);
 
     var root = wing.Router(State).init(gpa);
     errdefer root.deinit();

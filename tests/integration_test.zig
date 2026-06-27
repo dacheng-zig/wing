@@ -85,6 +85,36 @@ fn notFoundFallback(ctx: *Ctx) anyerror!void {
     try ctx.respond("custom fallback\n", .{ .status = .not_found });
 }
 
+// ── Cookie component handlers ────────────────────────────────────────────
+
+fn login(ctx: *Ctx) anyerror![]const u8 {
+    try ctx.setCookie(.{
+        .name = "sid",
+        .value = "tok123",
+        .path = "/",
+        .max_age = 3600,
+        .http_only = true,
+        .same_site = .lax,
+    });
+    return "ok";
+}
+
+const Prefs = struct { theme: []const u8 = "light", count: u32 = 0 };
+
+fn prefs(ctx: *Ctx, c: wing.Cookies(Prefs)) anyerror![]const u8 {
+    return std.fmt.allocPrint(ctx.arena, "theme={s} count={d}", .{ c.value.theme, c.value.count });
+}
+
+fn whoami(ctx: *Ctx) anyerror![]const u8 {
+    return ctx.cookie("sid") orelse "anon";
+}
+
+fn multiCookie(ctx: *Ctx) anyerror![]const u8 {
+    try ctx.setCookie(.{ .name = "sid", .value = "tok123", .http_only = true });
+    try ctx.setCookie(.{ .name = "theme", .value = "dark", .path = "/" });
+    return "ok";
+}
+
 const TestApp = wing.App(State, .{
     wing.middleware.logger,
     wing.middleware.recover,
@@ -108,6 +138,10 @@ fn buildRouter(gpa: std.mem.Allocator) !wing.Router(State) {
     try r.get("/boom", boom);
     try r.get("/old-path", oldPath);
     try r.get("/request-id", echoRequestId);
+    try r.get("/login", login);
+    try r.get("/prefs", prefs);
+    try r.get("/whoami", whoami);
+    try r.get("/multi-cookie", multiCookie);
     try r.get("/assets/*path", wing.static(State, "docs"));
     try r.add(.GET, "/admin", adminOnly, .{ .guard = wing.hostIs("admin.example.com") });
     try r.add(.GET, "/admin", publicSite, .{});
@@ -337,6 +371,73 @@ test "integration: cors preflight and simple-request header" {
     var res2 = try h.tc.get("/cors-data", .{});
     defer res2.deinit();
     try std.testing.expectEqual(null, res2.header("access-control-allow-origin"));
+}
+
+test "integration: setCookie emits a Set-Cookie header" {
+    const rt = try zio.Runtime.init(std.testing.allocator, .{});
+    defer rt.deinit();
+    var h: Harness = undefined;
+    try h.init(std.testing.allocator);
+    defer h.deinit();
+
+    var res = try h.tc.get("/login", .{});
+    defer res.deinit();
+    try std.testing.expectEqual(.ok, res.status);
+    try std.testing.expectEqualStrings(
+        "sid=tok123; Path=/; Max-Age=3600; HttpOnly; SameSite=Lax",
+        res.header("set-cookie").?,
+    );
+}
+
+test "integration: typed Cookies extractor binds request cookies" {
+    const rt = try zio.Runtime.init(std.testing.allocator, .{});
+    defer rt.deinit();
+    var h: Harness = undefined;
+    try h.init(std.testing.allocator);
+    defer h.deinit();
+
+    var res = try h.tc.get("/prefs", .{
+        .headers = &.{.{ .name = "cookie", .value = "theme=dark; count=5" }},
+    });
+    defer res.deinit();
+    try std.testing.expectEqualStrings("theme=dark count=5", res.body);
+
+    // Missing cookies fall back to field defaults.
+    var res2 = try h.tc.get("/prefs", .{});
+    defer res2.deinit();
+    try std.testing.expectEqualStrings("theme=light count=0", res2.body);
+}
+
+test "integration: multiple Set-Cookie headers are each observable" {
+    const rt = try zio.Runtime.init(std.testing.allocator, .{});
+    defer rt.deinit();
+    var h: Harness = undefined;
+    try h.init(std.testing.allocator);
+    defer h.deinit();
+
+    var res = try h.tc.get("/multi-cookie", .{});
+    defer res.deinit();
+    try std.testing.expectEqualStrings("tok123", res.cookie("sid").?);
+    try std.testing.expectEqualStrings("dark", res.cookie("theme").?);
+    try std.testing.expectEqual(@as(?[]const u8, null), res.cookie("missing"));
+}
+
+test "integration: ctx.cookie reads a single request cookie" {
+    const rt = try zio.Runtime.init(std.testing.allocator, .{});
+    defer rt.deinit();
+    var h: Harness = undefined;
+    try h.init(std.testing.allocator);
+    defer h.deinit();
+
+    var res = try h.tc.get("/whoami", .{
+        .headers = &.{.{ .name = "cookie", .value = "sid=abc; other=1" }},
+    });
+    defer res.deinit();
+    try std.testing.expectEqualStrings("abc", res.body);
+
+    var res2 = try h.tc.get("/whoami", .{});
+    defer res2.deinit();
+    try std.testing.expectEqualStrings("anon", res2.body);
 }
 
 test "integration: static file serving with traversal defense" {

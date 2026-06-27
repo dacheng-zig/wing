@@ -391,7 +391,7 @@ fn h(ctx: *Ctx) anyerror!void {
 }
 
 /// Minimal fake request for guard-path unit tests; only `head` matters.
-fn testRequest(head: talon.http.parser.Head) talon.http.Request {
+fn testRequest(head: talon.http.codec.request_parser.Head) talon.http.Request {
     return .{
         .head = head,
         .arena = std.testing.failing_allocator,
@@ -399,7 +399,7 @@ fn testRequest(head: talon.http.parser.Head) talon.http.Request {
     };
 }
 
-fn emptyHead() talon.http.parser.Head {
+fn emptyHead() talon.http.codec.request_parser.Head {
     return .{
         .method = .GET,
         .method_raw = "GET",

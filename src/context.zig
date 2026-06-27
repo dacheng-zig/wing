@@ -8,6 +8,7 @@ const std = @import("std");
 const talon = @import("talon");
 const endpoint_mod = @import("endpoint.zig");
 const router_mod = @import("router.zig");
+const cookie_mod = @import("cookie.zig");
 
 pub const max_path_params = 16;
 
@@ -59,6 +60,24 @@ pub fn Context(comptime State: type) type {
         /// Queues a header for the eventual response. Middleware-facing.
         pub fn addHeader(self: *Self, name: []const u8, value: []const u8) !void {
             try self.extra_headers.append(self.arena, .{ .name = name, .value = value });
+        }
+
+        /// Reads a request cookie by name (lazy, zero-copy; borrows the header).
+        /// For typed binding of several cookies, use the `Cookies(T)` extractor.
+        pub fn cookie(self: *const Self, name: []const u8) ?[]const u8 {
+            const raw = self.req.header("cookie") orelse return null;
+            return cookie_mod.View.init(raw).get(name);
+        }
+
+        /// Queues a `Set-Cookie` header for the eventual response. Serializes
+        /// into the request arena; each call adds one header, so multiple
+        /// cookies emit multiple `Set-Cookie` lines. Returns `CookieError` if
+        /// the cookie is malformed (invalid name/value, prefix or Secure
+        /// violation) — a handler bug, surfaced rather than silently dropped.
+        pub fn setCookie(self: *Self, c: cookie_mod.Cookie) !void {
+            var out: std.Io.Writer.Allocating = .init(self.arena);
+            try c.serialize(&out.writer);
+            try self.addHeader("set-cookie", out.written());
         }
 
         /// Respond with middleware-accumulated headers merged in. wing's

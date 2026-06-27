@@ -18,8 +18,13 @@ const talon = @import("talon");
 const context_mod = @import("context.zig");
 const endpoint_mod = @import("endpoint.zig");
 const state_mod = @import("state.zig");
+const scalar = @import("scalar.zig");
+const cookie_mod = @import("cookie.zig");
 
-pub const ExtractError = error{
+/// The aggregate of every built-in extractor's failure modes — the cookie
+/// extractor's included — so a caller can `catch` one set to handle any
+/// extraction error. Each extractor still returns only its own subset.
+pub const ExtractError = cookie_mod.ExtractError || error{
     MissingQueryParam,
     InvalidQueryParam,
     MissingPathParam,
@@ -277,7 +282,7 @@ pub fn Path(comptime T: type) type {
             inline for (@typeInfo(T).@"struct".fields) |f| {
                 const raw = ctx.params.get(f.name) orelse
                     return error.MissingPathParam;
-                @field(value, f.name) = parseScalar(f.type, raw) catch
+                @field(value, f.name) = scalar.parseScalar(f.type, raw) catch
                     return error.InvalidPathParam;
             }
             return .{ .value = value };
@@ -300,7 +305,7 @@ fn parseQuery(comptime T: type, arena: std.mem.Allocator, raw: []const u8) !T {
         const val = try urlDecode(arena, raw_val);
         inline for (fields, 0..) |f, fi| {
             if (std.mem.eql(u8, f.name, key)) {
-                @field(value, f.name) = parseScalar(f.type, val) catch
+                @field(value, f.name) = scalar.parseScalar(f.type, val) catch
                     return error.InvalidQueryParam;
                 seen[fi] = true;
             }
@@ -320,28 +325,6 @@ fn parseQuery(comptime T: type, arena: std.mem.Allocator, raw: []const u8) !T {
         }
     }
     return value;
-}
-
-fn parseScalar(comptime T: type, raw: []const u8) !T {
-    return switch (@typeInfo(T)) {
-        .optional => |o| try parseScalar(o.child, raw),
-        .int => std.fmt.parseInt(T, raw, 10),
-        .float => std.fmt.parseFloat(T, raw),
-        .bool => if (std.mem.eql(u8, raw, "true") or std.mem.eql(u8, raw, "1"))
-            true
-        else if (std.mem.eql(u8, raw, "false") or std.mem.eql(u8, raw, "0"))
-            false
-        else
-            error.InvalidCharacter,
-        .@"enum" => std.meta.stringToEnum(T, raw) orelse error.InvalidCharacter,
-        .pointer => if (T == []const u8) raw else unsupportedScalar(T),
-        else => unsupportedScalar(T),
-    };
-}
-
-fn unsupportedScalar(comptime T: type) noreturn {
-    @compileError("wing: unsupported Query/Path field type " ++ @typeName(T) ++
-        " — supported: integers, floats, bool, enums, []const u8, optionals thereof");
 }
 
 /// Percent-decoding plus '+' → space. Borrows `raw` when no decoding is
@@ -407,11 +390,4 @@ test "urlDecode: borrow fast path and decode path" {
     try std.testing.expectEqualStrings("a b+c", try urlDecode(arena, "a+b%2Bc"));
     try std.testing.expectError(error.InvalidQueryParam, urlDecode(arena, "%2"));
     try std.testing.expectError(error.InvalidQueryParam, urlDecode(arena, "%zz"));
-}
-
-test "parseScalar: enums and optionals" {
-    const Color = enum { red, green };
-    try std.testing.expectEqual(Color.red, try parseScalar(Color, "red"));
-    try std.testing.expectError(error.InvalidCharacter, parseScalar(Color, "blue"));
-    try std.testing.expectEqual(@as(?u32, 7), try parseScalar(?u32, "7"));
 }

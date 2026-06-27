@@ -8,6 +8,7 @@ const std = @import("std");
 const talon = @import("talon");
 const zio = @import("zio");
 const router_mod = @import("router.zig");
+const cookie_mod = @import("cookie.zig");
 
 pub const RequestOptions = struct {
     headers: []const talon.http.Header = &.{},
@@ -34,6 +35,21 @@ pub const TestResponse = struct {
     pub fn header(self: *const TestResponse, name: []const u8) ?[]const u8 {
         for (self.headers) |hdr| {
             if (std.ascii.eqlIgnoreCase(hdr.name, name)) return hdr.value;
+        }
+        return null;
+    }
+
+    /// Value of the issued cookie named `name` (the `name=value` pair parsed off
+    /// its `Set-Cookie` header; attributes ignored), or null. Scans every
+    /// `Set-Cookie`, so multiple cookies in one response are each observable —
+    /// the cookie-aware complement to `header`, which only returns the first.
+    pub fn cookie(self: *const TestResponse, name: []const u8) ?[]const u8 {
+        for (self.headers) |hdr| {
+            if (!std.ascii.eqlIgnoreCase(hdr.name, "set-cookie")) continue;
+            var it = cookie_mod.View.init(hdr.value).iterator();
+            if (it.next()) |pair| {
+                if (std.mem.eql(u8, pair.name, name)) return pair.value;
+            }
         }
         return null;
     }

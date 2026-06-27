@@ -38,12 +38,20 @@ pub const Query = @import("extract.zig").Query;
 pub const Path = @import("extract.zig").Path;
 pub const ExtractError = @import("extract.zig").ExtractError;
 
+pub const Cookie = @import("cookie.zig").Cookie;
+pub const Cookies = @import("cookie.zig").Cookies;
+pub const CookieView = @import("cookie.zig").View;
+pub const SameSite = @import("cookie.zig").SameSite;
+pub const CookieError = @import("cookie.zig").CookieError;
+
 test {
     std.testing.refAllDecls(@This());
     _ = @import("endpoint.zig");
     _ = @import("context.zig");
     _ = @import("router.zig");
     _ = @import("extract.zig");
+    _ = @import("scalar.zig");
+    _ = @import("cookie.zig");
     _ = @import("state.zig");
     _ = @import("middleware.zig");
     _ = @import("app.zig");
@@ -55,7 +63,7 @@ test "wing imports talon public contract" {
     _ = talon.http.Server;
     _ = talon.http.Request;
     _ = talon.http.Response;
-    _ = talon.http.BodyReader;
+    _ = talon.http.codec.BodyReader;
     _ = talon.chain;
     _ = talon.MemoryListener;
 }
