@@ -30,6 +30,14 @@ pub const ExtractError = cookie_mod.ExtractError || error{
     MissingPathParam,
     InvalidPathParam,
     InvalidJsonBody,
+    /// Body absent or its Content-Type is not application/x-www-form-urlencoded.
+    InvalidFormBody,
+    MissingFormField,
+    InvalidFormField,
+    /// A streamed body exceeded the server's `max_body_size` (413). Only
+    /// chunked bodies reach this — oversized Content-Length bodies are
+    /// rejected by talon before the handler runs.
+    PayloadTooLarge,
 };
 
 // ── Handler binding ──────────────────────────────────────────────────────
@@ -184,6 +192,16 @@ fn jsonStringifyArena(arena: std.mem.Allocator, value: anytype) ![]const u8 {
     return out.written();
 }
 
+/// Classifies a failed body stream. A size-limit breach becomes
+/// `PayloadTooLarge` (413); every other failure keeps the caller's generic
+/// body error (400). Shared by the `Json` and `Form` body extractors.
+fn bodyReadError(ctx: anytype, generic: ExtractError) ExtractError {
+    if (ctx.req.bodyError()) |berr| {
+        if (berr == error.BodyTooLarge) return error.PayloadTooLarge;
+    }
+    return generic;
+}
+
 // ── Built-in extractors / responders ─────────────────────────────────────
 
 /// JSON in both directions: as a parameter it consumes and parses the
@@ -195,7 +213,7 @@ pub fn Json(comptime T: type) type {
         pub fn fromRequest(ctx: anytype) !@This() {
             var collected: std.Io.Writer.Allocating = .init(ctx.arena);
             _ = ctx.req.bodyReader().streamRemaining(&collected.writer) catch
-                return error.InvalidJsonBody;
+                return bodyReadError(ctx, error.InvalidJsonBody);
             const value = std.json.parseFromSliceLeaky(
                 T,
                 ctx.arena,
@@ -266,9 +284,51 @@ pub fn Query(comptime T: type) type {
                 target[i + 1 ..]
             else
                 "";
-            return .{ .value = try parseQuery(T, ctx.arena, raw) };
+            return .{
+                .value = parseUrlEncoded(T, ctx.arena, raw) catch |e| switch (e) {
+                    error.MissingField => return error.MissingQueryParam,
+                    error.InvalidField => return error.InvalidQueryParam,
+                    else => |other| return other, // OutOfMemory
+                },
+            };
         }
     };
+}
+
+/// Parses an `application/x-www-form-urlencoded` request body into `T`
+/// (fromRequest). The body grammar matches the query string, so it shares
+/// `Query`'s parser — only the source (body vs URL) and the strict
+/// Content-Type guard differ. Field-type and required/optional rules are
+/// identical to `Query`. `multipart/form-data` is out of scope.
+pub fn Form(comptime T: type) type {
+    return struct {
+        value: T,
+
+        pub fn fromRequest(ctx: anytype) !@This() {
+            const ct = ctx.req.header("content-type") orelse return error.InvalidFormBody;
+            if (!isFormContentType(ct)) return error.InvalidFormBody;
+
+            var collected: std.Io.Writer.Allocating = .init(ctx.arena);
+            _ = ctx.req.bodyReader().streamRemaining(&collected.writer) catch
+                return bodyReadError(ctx, error.InvalidFormBody);
+
+            return .{
+                .value = parseUrlEncoded(T, ctx.arena, collected.written()) catch |e| switch (e) {
+                    error.MissingField => return error.MissingFormField,
+                    error.InvalidField => return error.InvalidFormField,
+                    else => |other| return other, // OutOfMemory
+                },
+            };
+        }
+    };
+}
+
+/// True when `value` is the form media type, ignoring optional parameters
+/// (`; charset=...`) and case — media types are case-insensitive (RFC 9110).
+fn isFormContentType(value: []const u8) bool {
+    const end = std.mem.indexOfScalar(u8, value, ';') orelse value.len;
+    const media_type = std.mem.trim(u8, value[0..end], " \t");
+    return std.ascii.eqlIgnoreCase(media_type, "application/x-www-form-urlencoded");
 }
 
 /// Binds path parameters captured by the router to `T`'s fields by name
@@ -290,7 +350,16 @@ pub fn Path(comptime T: type) type {
     };
 }
 
-fn parseQuery(comptime T: type, arena: std.mem.Allocator, raw: []const u8) !T {
+/// Shared `x-www-form-urlencoded` parser for `Query` (URL) and `Form` (body):
+/// the two grammars are identical. Returns neutral `MissingField`/`InvalidField`
+/// errors so each caller can remap them to its own contract-specific names. The
+/// error set is declared (not inferred) so callers can `switch` on it even when
+/// a given `T` makes the `MissingField` branch comptime-unreachable.
+fn parseUrlEncoded(
+    comptime T: type,
+    arena: std.mem.Allocator,
+    raw: []const u8,
+) error{ MissingField, InvalidField, OutOfMemory }!T {
     const fields = @typeInfo(T).@"struct".fields;
     var value: T = undefined;
     var seen = [_]bool{false} ** fields.len;
@@ -306,11 +375,11 @@ fn parseQuery(comptime T: type, arena: std.mem.Allocator, raw: []const u8) !T {
         inline for (fields, 0..) |f, fi| {
             if (std.mem.eql(u8, f.name, key)) {
                 @field(value, f.name) = scalar.parseScalar(f.type, val) catch
-                    return error.InvalidQueryParam;
+                    return error.InvalidField;
                 seen[fi] = true;
             }
         }
-        // Unknown keys are ignored: forward-compatible query contracts.
+        // Unknown keys are ignored: forward-compatible contracts.
     }
 
     inline for (fields, 0..) |f, fi| {
@@ -320,7 +389,7 @@ fn parseQuery(comptime T: type, arena: std.mem.Allocator, raw: []const u8) !T {
             } else if (@typeInfo(f.type) == .optional) {
                 @field(value, f.name) = null;
             } else {
-                return error.MissingQueryParam;
+                return error.MissingField;
             }
         }
     }
@@ -338,9 +407,9 @@ fn urlDecode(arena: std.mem.Allocator, raw: []const u8) ![]const u8 {
         switch (raw[i]) {
             '+' => out[n] = ' ',
             '%' => {
-                if (i + 2 >= raw.len) return error.InvalidQueryParam;
+                if (i + 2 >= raw.len) return error.InvalidField;
                 out[n] = std.fmt.parseInt(u8, raw[i + 1 .. i + 3], 16) catch
-                    return error.InvalidQueryParam;
+                    return error.InvalidField;
                 i += 2;
             },
             else => out[n] = raw[i],
@@ -352,7 +421,7 @@ fn urlDecode(arena: std.mem.Allocator, raw: []const u8) ![]const u8 {
 
 // ── Tests ────────────────────────────────────────────────────────────────
 
-test "parseQuery: types, defaults, optionals, required" {
+test "parseUrlEncoded: types, defaults, optionals, required" {
     const P = struct {
         page: u32 = 1,
         per_page: u32 = 20,
@@ -363,19 +432,19 @@ test "parseQuery: types, defaults, optionals, required" {
     defer arena_state.deinit();
     const arena = arena_state.allocator();
 
-    const p1 = try parseQuery(P, arena, "page=3&q=zig%20web&strict=true");
+    const p1 = try parseUrlEncoded(P, arena, "page=3&q=zig%20web&strict=true");
     try std.testing.expectEqual(3, p1.page);
     try std.testing.expectEqual(20, p1.per_page);
     try std.testing.expectEqualStrings("zig web", p1.q.?);
     try std.testing.expectEqual(true, p1.strict);
 
-    const p2 = try parseQuery(P, arena, "");
+    const p2 = try parseUrlEncoded(P, arena, "");
     try std.testing.expectEqual(1, p2.page);
     try std.testing.expectEqual(null, p2.q);
 
     const R = struct { id: u64 };
-    try std.testing.expectError(error.MissingQueryParam, parseQuery(R, arena, ""));
-    try std.testing.expectError(error.InvalidQueryParam, parseQuery(R, arena, "id=abc"));
+    try std.testing.expectError(error.MissingField, parseUrlEncoded(R, arena, ""));
+    try std.testing.expectError(error.InvalidField, parseUrlEncoded(R, arena, "id=abc"));
 }
 
 test "urlDecode: borrow fast path and decode path" {
@@ -388,6 +457,16 @@ test "urlDecode: borrow fast path and decode path" {
     try std.testing.expectEqual(plain.ptr, decoded_plain.ptr); // borrowed
 
     try std.testing.expectEqualStrings("a b+c", try urlDecode(arena, "a+b%2Bc"));
-    try std.testing.expectError(error.InvalidQueryParam, urlDecode(arena, "%2"));
-    try std.testing.expectError(error.InvalidQueryParam, urlDecode(arena, "%zz"));
+    try std.testing.expectError(error.InvalidField, urlDecode(arena, "%2"));
+    try std.testing.expectError(error.InvalidField, urlDecode(arena, "%zz"));
+}
+
+test "isFormContentType: media type match ignores params and case" {
+    try std.testing.expect(isFormContentType("application/x-www-form-urlencoded"));
+    try std.testing.expect(isFormContentType("application/x-www-form-urlencoded; charset=utf-8"));
+    try std.testing.expect(isFormContentType("Application/X-WWW-Form-Urlencoded"));
+    try std.testing.expect(isFormContentType("  application/x-www-form-urlencoded  "));
+    try std.testing.expect(!isFormContentType("application/json"));
+    try std.testing.expect(!isFormContentType("multipart/form-data; boundary=x"));
+    try std.testing.expect(!isFormContentType(""));
 }

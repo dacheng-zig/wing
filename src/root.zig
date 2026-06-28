@@ -36,6 +36,7 @@ pub const Created = @import("extract.zig").Created;
 pub const Redirect = @import("extract.zig").Redirect;
 pub const Query = @import("extract.zig").Query;
 pub const Path = @import("extract.zig").Path;
+pub const Form = @import("extract.zig").Form;
 pub const ExtractError = @import("extract.zig").ExtractError;
 
 pub const Cookie = @import("cookie.zig").Cookie;

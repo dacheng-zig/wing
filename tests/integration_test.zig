@@ -52,6 +52,15 @@ fn search(ctx: *Ctx, q: wing.Query(Pagination)) anyerror![]const u8 {
     return std.fmt.allocPrint(ctx.arena, "page={d}", .{q.value.page});
 }
 
+const LoginForm = struct { user: []const u8, remember: bool = false };
+
+fn formLogin(ctx: *Ctx, form: wing.Form(LoginForm)) anyerror![]const u8 {
+    return std.fmt.allocPrint(ctx.arena, "user={s} remember={}", .{
+        form.value.user,
+        form.value.remember,
+    });
+}
+
 fn boom(ctx: *Ctx) anyerror!void {
     _ = ctx;
     return error.Boom;
@@ -135,6 +144,7 @@ fn buildRouter(gpa: std.mem.Allocator) !wing.Router(State) {
     errdefer r.deinit();
     try r.get("/", rawRoot);
     try r.get("/search", search);
+    try r.post("/form-login", formLogin);
     try r.get("/boom", boom);
     try r.get("/old-path", oldPath);
     try r.get("/request-id", echoRequestId);
@@ -225,6 +235,95 @@ test "integration: malformed Json body maps to 400 via recover" {
     var res = try h.tc.post("/api/v1/users", .{ .body = "not json" });
     defer res.deinit();
     try std.testing.expectEqual(.bad_request, res.status);
+}
+
+test "integration: Form body extractor parses urlencoded fields" {
+    const rt = try zio.Runtime.init(std.testing.allocator, .{});
+    defer rt.deinit();
+    var h: Harness = undefined;
+    try h.init(std.testing.allocator);
+    defer h.deinit();
+
+    const form = "content-type";
+    const urlenc = "application/x-www-form-urlencoded";
+
+    // Required field + explicit bool, with url decoding.
+    var res = try h.tc.post("/form-login", .{
+        .headers = &.{.{ .name = form, .value = urlenc }},
+        .body = "user=ada%20l&remember=true",
+    });
+    defer res.deinit();
+    try std.testing.expectEqual(.ok, res.status);
+    try std.testing.expectEqualStrings("user=ada l remember=true", res.body);
+
+    // Field with a default is optional in the body.
+    var res2 = try h.tc.post("/form-login", .{
+        .headers = &.{.{ .name = form, .value = urlenc }},
+        .body = "user=grace",
+    });
+    defer res2.deinit();
+    try std.testing.expectEqualStrings("user=grace remember=false", res2.body);
+}
+
+test "integration: Form rejects wrong content-type and missing fields with 400" {
+    const rt = try zio.Runtime.init(std.testing.allocator, .{});
+    defer rt.deinit();
+    var h: Harness = undefined;
+    try h.init(std.testing.allocator);
+    defer h.deinit();
+
+    // No / wrong content-type → InvalidFormBody → 400.
+    var res = try h.tc.post("/form-login", .{ .body = "user=ada" });
+    defer res.deinit();
+    try std.testing.expectEqual(.bad_request, res.status);
+
+    // Correct content-type but the required `user` field is absent → 400.
+    var res2 = try h.tc.post("/form-login", .{
+        .headers = &.{.{ .name = "content-type", .value = "application/x-www-form-urlencoded" }},
+        .body = "remember=true",
+    });
+    defer res2.deinit();
+    try std.testing.expectEqual(.bad_request, res2.status);
+}
+
+test "integration: oversized chunked body maps to 413, within-limit parses" {
+    const rt = try zio.Runtime.init(std.testing.allocator, .{});
+    defer rt.deinit();
+
+    var router = try buildRouter(std.testing.allocator);
+    defer router.deinit();
+    var state: State = .{ .db = .{}, .cfg = .{} };
+
+    // Tiny body cap so a normal form body trips the streaming limit. Only
+    // chunked bodies reach the extractor — talon rejects oversized
+    // Content-Length bodies before the handler runs.
+    var tc = try Client.initWithOptions(std.testing.allocator, &router, &state, .{
+        .limits = .{ .max_body_size = 16 },
+    });
+    defer tc.deinit();
+
+    const form = "content-type";
+    const urlenc = "application/x-www-form-urlencoded";
+
+    // Within the cap: chunked framing parses just like Content-Length (control
+    // that proves chunking itself is handled, isolating the size as the cause).
+    var ok = try tc.post("/form-login", .{
+        .headers = &.{.{ .name = form, .value = urlenc }},
+        .body = "user=ada", // 8 bytes ≤ 16
+        .chunked = true,
+    });
+    defer ok.deinit();
+    try std.testing.expectEqual(.ok, ok.status);
+    try std.testing.expectEqualStrings("user=ada remember=false", ok.body);
+
+    // Past the cap → BodyTooLarge surfaces as PayloadTooLarge → 413 (not 400).
+    var res = try tc.post("/form-login", .{
+        .headers = &.{.{ .name = form, .value = urlenc }},
+        .body = "user=aaaaaaaaaaaaaaaaaaaaaaaaaaaa", // 33 bytes > 16
+        .chunked = true,
+    });
+    defer res.deinit();
+    try std.testing.expectEqual(.payload_too_large, res.status);
 }
 
 test "integration: query extractor with defaults and url decoding" {

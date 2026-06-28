@@ -13,6 +13,11 @@ const cookie_mod = @import("cookie.zig");
 pub const RequestOptions = struct {
     headers: []const talon.http.Header = &.{},
     body: []const u8 = "",
+    /// Frame `body` as a single `Transfer-Encoding: chunked` chunk instead of
+    /// Content-Length. Chunked has no declared length, so the server enforces
+    /// `max_body_size` while streaming (rather than rejecting up front) —
+    /// the path that surfaces `BodyTooLarge` to extractors.
+    chunked: bool = false,
 };
 
 pub const TestResponse = struct {
@@ -77,10 +82,24 @@ pub fn TestClient(comptime A: type) type {
         server: *Srv,
         server_group: *zio.Group,
 
+        pub const Options = struct {
+            /// Server limits (e.g. a small `max_body_size` to exercise 413).
+            limits: talon.Limits = .{},
+        };
+
         pub fn init(
             gpa: std.mem.Allocator,
             router: *const router_mod.Router(State),
             state: *State,
+        ) !Self {
+            return initWithOptions(gpa, router, state, .{});
+        }
+
+        pub fn initWithOptions(
+            gpa: std.mem.Allocator,
+            router: *const router_mod.Router(State),
+            state: *State,
+            options: Options,
         ) !Self {
             const listener = try gpa.create(talon.MemoryListener);
             errdefer gpa.destroy(listener);
@@ -93,7 +112,7 @@ pub fn TestClient(comptime A: type) type {
 
             const server = try gpa.create(Srv);
             errdefer gpa.destroy(server);
-            server.* = try Srv.init(gpa, app, .{});
+            server.* = try Srv.init(gpa, app, .{ .limits = options.limits });
             errdefer server.deinit();
 
             const group = try gpa.create(zio.Group);
@@ -203,7 +222,13 @@ pub fn TestClient(comptime A: type) type {
             }
             if (!has_host) try out.writeAll("host: test\r\n");
             try out.writeAll("connection: close\r\n");
-            if (options.body.len > 0) {
+            if (options.chunked) {
+                // Single-chunk body: "<hexlen>\r\n<data>\r\n0\r\n\r\n".
+                try out.writeAll("transfer-encoding: chunked\r\n\r\n");
+                try out.print("{x}\r\n", .{options.body.len});
+                try out.writeAll(options.body);
+                try out.writeAll("\r\n0\r\n\r\n");
+            } else if (options.body.len > 0) {
                 try out.print("content-length: {d}\r\n\r\n", .{options.body.len});
                 try out.writeAll(options.body);
             } else {
