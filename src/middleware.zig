@@ -137,17 +137,48 @@ pub const logger = struct {
                 @tagName(ctx.req.method()),
                 target,
                 err,
-                stopwatch.read(),
+                elapsed(&stopwatch),
             });
             return err;
         };
         std.log.scoped(.wing).debug("{s} {s} ({f})", .{
             @tagName(ctx.req.method()),
             target,
-            stopwatch.read(),
+            elapsed(&stopwatch),
         });
     }
+
+    // Request timings are logged at microsecond resolution: rounding the raw
+    // reading drops nanosecond noise (e.g. "21.537042ms" -> "21.537ms") while
+    // the Go-style Duration formatter still picks units and trims trailing
+    // zeros, so us/ms/s all stay readable ("530us", "21.537ms", "1.5s").
+    fn elapsed(stopwatch: *zio.Stopwatch) zio.Duration {
+        return roundToMicros(stopwatch.read());
+    }
+
+    fn roundToMicros(d: zio.Duration) zio.Duration {
+        const ns = d.toNanoseconds();
+        return zio.Duration.fromNanoseconds((ns + ns_per_us / 2) / ns_per_us * ns_per_us);
+    }
+
+    const ns_per_us = 1000;
 };
+
+test "logger: elapsed rounds to microseconds and keeps adaptive us/ms/s units" {
+    var buf: [64]u8 = undefined;
+    const cases = [_]struct { ns: u64, expected: []const u8 }{
+        .{ .ns = 400, .expected = "0s" }, // sub-microsecond rounds away
+        .{ .ns = 1_499, .expected = "1us" }, // rounds to nearest us
+        .{ .ns = 530_123, .expected = "530us" }, // us range
+        .{ .ns = 21_537_042, .expected = "21.537ms" }, // the reported case
+        .{ .ns = 1_500_000_000, .expected = "1.5s" }, // s range
+    };
+    for (cases) |c| {
+        const rounded = logger.roundToMicros(zio.Duration.fromNanoseconds(c.ns));
+        const out = try std.fmt.bufPrint(&buf, "{f}", .{rounded});
+        try std.testing.expectEqualStrings(c.expected, out);
+    }
+}
 
 /// Tags the request with a process-unique id: `ctx.request_id` for handlers
 /// and an `x-request-id` response header (via ctx.respond merging).
