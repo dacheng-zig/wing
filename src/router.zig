@@ -15,7 +15,7 @@ const std = @import("std");
 const talon = @import("talon");
 const endpoint_mod = @import("endpoint.zig");
 const context_mod = @import("context.zig");
-const extract = @import("extract.zig");
+const binding = @import("binding.zig");
 
 const Endpoint = endpoint_mod.Endpoint;
 const Guard = endpoint_mod.Guard;
@@ -104,7 +104,7 @@ pub fn Router(comptime State: type) type {
             comptime handler: anytype,
             options: RouteOptions,
         ) RouteError!void {
-            try self.addThunk(method, path, extract.bind(State, handler), options);
+            try self.addThunk(method, path, binding.bind(State, handler), options);
         }
 
         pub fn get(self: *Self, path: []const u8, comptime handler: anytype) RouteError!void {
@@ -129,7 +129,7 @@ pub fn Router(comptime State: type) type {
 
         /// Unmatched-request terminal. Replaces any previous fallback.
         pub fn fallback(self: *Self, comptime handler: anytype) void {
-            self.fallback_handler = extract.bind(State, handler);
+            self.fallback_handler = binding.bind(State, handler);
         }
 
         /// Pre-bound registration: used by `add` and by tree grafting.
@@ -396,6 +396,7 @@ fn testRequest(head: talon.http.codec.request_parser.Head) talon.http.Request {
         .head = head,
         .arena = std.testing.failing_allocator,
         .body = undefined, // never touched by match/guards in these tests
+        .upgrade = undefined, // ditto
     };
 }
 

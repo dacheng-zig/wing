@@ -1,16 +1,18 @@
 //! wing framework demo.
 //!
 //! Shows the full first-phase surface: Router composition (nest/merge),
-//! typed extractors (Path/Query/Json + state projection), toResponse
-//! conversion (Json/Created/Redirect/text), per-route metadata (cors,
-//! auth), guards, built-in middleware, and static file serving.
+//! typed extractors (wing.extract.* + state projection), toResponse
+//! conversion (wing.respond.* / text), per-route metadata (cors, auth),
+//! guards, built-in middleware, and static file serving.
 //!
 //! Run:  zig build run-demo
 //! Try:  curl http://127.0.0.1:8080/
 //!       curl http://127.0.0.1:8080/api/v1/users/42
 //!       curl 'http://127.0.0.1:8080/api/v1/users?page=2&q=ada'
-//!       curl -X POST http://127.0.0.1:8080/api/v1/users -d '{"name":"grace"}'
+//!       curl -X POST http://127.0.0.1:8080/api/v1/users \
+//!            -H 'content-type: application/json' -d '{"name":"grace"}'
 //!       curl -X DELETE http://127.0.0.1:8080/api/v1/users   # 405 + Allow
+//!       curl -F file=@build.zig -F note=hi http://127.0.0.1:8080/upload
 //!       curl http://127.0.0.1:8080/assets/user-guide.md
 //!       curl -i 'http://127.0.0.1:8080/theme/set?theme=light'  # Set-Cookie
 //!       curl --cookie 'theme=light' http://127.0.0.1:8080/theme
@@ -52,13 +54,13 @@ fn home(ctx: *Ctx, cfg: *Config) anyerror![]const u8 {
 
 fn getUser(
     ctx: *Ctx,
-    path: wing.Path(struct { id: u64 }),
-) anyerror!wing.Json(User) {
+    path: wing.extract.Path(struct { id: u64 }),
+) anyerror!wing.respond.Json(User) {
     _ = ctx;
     return .{ .value = .{ .id = path.value.id, .name = "ada" } };
 }
 
-fn listUsers(ctx: *Ctx, q: wing.Query(UserQuery)) anyerror![]const u8 {
+fn listUsers(ctx: *Ctx, q: wing.extract.Query(UserQuery)) anyerror![]const u8 {
     return std.fmt.allocPrint(ctx.arena, "users page={d} q={s}\n", .{
         q.value.page, q.value.q orelse "<none>",
     });
@@ -67,8 +69,8 @@ fn listUsers(ctx: *Ctx, q: wing.Query(UserQuery)) anyerror![]const u8 {
 fn createUser(
     ctx: *Ctx,
     db: *Db,
-    body: wing.Json(CreateUserReq),
-) anyerror!wing.Created(User) {
+    body: wing.extract.Json(CreateUserReq),
+) anyerror!wing.respond.Created(User) {
     const user = db.createUser(body.value.name);
     return .{
         .value = user,
@@ -76,7 +78,7 @@ fn createUser(
     };
 }
 
-fn legacy(ctx: *Ctx) anyerror!wing.Redirect {
+fn legacy(ctx: *Ctx) anyerror!wing.respond.Redirect {
     _ = ctx;
     return .{ .location = "/", .status = .moved_permanently };
 }
@@ -87,7 +89,7 @@ fn health(ctx: *Ctx) anyerror![]const u8 {
 }
 
 // Cookie component: write a hardened session cookie, read it back.
-fn setTheme(ctx: *Ctx, q: wing.Query(struct { theme: []const u8 = "dark" })) anyerror![]const u8 {
+fn setTheme(ctx: *Ctx, q: wing.extract.Query(struct { theme: []const u8 = "dark" })) anyerror![]const u8 {
     try ctx.setCookie(.{
         .name = "theme",
         .value = q.value.theme,
@@ -101,6 +103,15 @@ fn setTheme(ctx: *Ctx, q: wing.Query(struct { theme: []const u8 = "dark" })) any
 
 fn readTheme(ctx: *Ctx) anyerror![]const u8 {
     return std.fmt.allocPrint(ctx.arena, "theme={s}\n", .{ctx.cookie("theme") orelse "<unset>"});
+}
+
+fn upload(ctx: *Ctx, mp: wing.extract.Multipart) anyerror![]const u8 {
+    const f = mp.file("file") orelse return error.InvalidMultipartBody;
+    return std.fmt.allocPrint(ctx.arena, "got {s} ({d} bytes), note={s}\n", .{
+        f.filename.?,
+        f.data.len,
+        mp.field("note") orelse "<none>",
+    });
 }
 
 fn adminPanel(ctx: *Ctx) anyerror![]const u8 {
@@ -140,6 +151,7 @@ fn buildRouter(gpa: std.mem.Allocator) !wing.Router(State) {
     errdefer root.deinit();
     try root.get("/", home);
     try root.get("/legacy", legacy);
+    try root.post("/upload", upload);
     try root.get("/assets/*path", wing.static(State, "docs"));
     // Per-route metadata: cors policy + auth requirement + guard.
     try root.add(.GET, "/admin", adminPanel, .{

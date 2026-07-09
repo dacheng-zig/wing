@@ -31,16 +31,14 @@ pub const TestClient = @import("test_client.zig").TestClient;
 pub const TestResponse = @import("test_client.zig").TestResponse;
 pub const RequestOptions = @import("test_client.zig").RequestOptions;
 
-pub const Json = @import("extract.zig").Json;
-pub const Created = @import("extract.zig").Created;
-pub const Redirect = @import("extract.zig").Redirect;
-pub const Query = @import("extract.zig").Query;
-pub const Path = @import("extract.zig").Path;
-pub const Form = @import("extract.zig").Form;
-pub const ExtractError = @import("extract.zig").ExtractError;
+/// Request-side: typed extractors bound to handler parameters
+/// (`wing.extract.Query(T)`, `wing.extract.Json(T)`, ...).
+pub const extract = @import("extract.zig");
+/// Response-side: types a handler returns to produce a response
+/// (`wing.respond.Json(T)`, `wing.respond.Created(T)`, ...).
+pub const respond = @import("respond.zig");
 
 pub const Cookie = @import("cookie.zig").Cookie;
-pub const Cookies = @import("cookie.zig").Cookies;
 pub const CookieView = @import("cookie.zig").View;
 pub const SameSite = @import("cookie.zig").SameSite;
 pub const CookieError = @import("cookie.zig").CookieError;
@@ -50,7 +48,9 @@ test {
     _ = @import("endpoint.zig");
     _ = @import("context.zig");
     _ = @import("router.zig");
+    _ = @import("binding.zig");
     _ = @import("extract.zig");
+    _ = @import("respond.zig");
     _ = @import("scalar.zig");
     _ = @import("cookie.zig");
     _ = @import("state.zig");

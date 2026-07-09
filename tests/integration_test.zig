@@ -25,8 +25,8 @@ fn rawRoot(ctx: *Ctx) anyerror!void {
 fn getUser(
     ctx: *Ctx,
     cfg: *Config,
-    path: wing.Path(struct { id: u64 }),
-) anyerror!wing.Json(User) {
+    path: wing.extract.Path(struct { id: u64 }),
+) anyerror!wing.respond.Json(User) {
     _ = ctx;
     std.debug.assert(cfg.service.len > 0);
     return .{ .value = .{ .id = path.value.id, .name = "ada" } };
@@ -35,8 +35,8 @@ fn getUser(
 fn createUser(
     ctx: *Ctx,
     db: *Db,
-    body: wing.Json(CreateUserReq),
-) anyerror!wing.Created(User) {
+    body: wing.extract.Json(CreateUserReq),
+) anyerror!wing.respond.Created(User) {
     db.users_created += 1;
     const id: u64 = db.users_created;
     return .{
@@ -45,7 +45,7 @@ fn createUser(
     };
 }
 
-fn search(ctx: *Ctx, q: wing.Query(Pagination)) anyerror![]const u8 {
+fn search(ctx: *Ctx, q: wing.extract.Query(Pagination)) anyerror![]const u8 {
     if (q.value.q) |term| {
         return std.fmt.allocPrint(ctx.arena, "page={d} q={s}", .{ q.value.page, term });
     }
@@ -54,10 +54,38 @@ fn search(ctx: *Ctx, q: wing.Query(Pagination)) anyerror![]const u8 {
 
 const LoginForm = struct { user: []const u8, remember: bool = false };
 
-fn formLogin(ctx: *Ctx, form: wing.Form(LoginForm)) anyerror![]const u8 {
+fn formLogin(ctx: *Ctx, form: wing.extract.Form(LoginForm)) anyerror![]const u8 {
     return std.fmt.allocPrint(ctx.arena, "user={s} remember={}", .{
         form.value.user,
         form.value.remember,
+    });
+}
+
+const ClientInfo = struct {
+    x_client_version: u32,
+    user_agent: ?[]const u8,
+    x_retries: u8 = 7,
+};
+
+fn headersEcho(ctx: *Ctx, h: wing.extract.Headers(ClientInfo)) anyerror![]const u8 {
+    return std.fmt.allocPrint(ctx.arena, "v={d} ua={s} r={d}", .{
+        h.value.x_client_version,
+        h.value.user_agent orelse "none",
+        h.value.x_retries,
+    });
+}
+
+fn bytesEcho(ctx: *Ctx, raw: wing.extract.Bytes) anyerror![]const u8 {
+    return std.fmt.allocPrint(ctx.arena, "len={d} body={s}", .{ raw.value.len, raw.value });
+}
+
+fn upload(ctx: *Ctx, mp: wing.extract.Multipart) anyerror![]const u8 {
+    const f = mp.file("file") orelse return error.InvalidMultipartBody;
+    return std.fmt.allocPrint(ctx.arena, "file={s} type={s} len={d} note={s}", .{
+        f.filename.?,
+        f.content_type orelse "none",
+        f.data.len,
+        mp.field("note") orelse "none",
     });
 }
 
@@ -66,7 +94,7 @@ fn boom(ctx: *Ctx) anyerror!void {
     return error.Boom;
 }
 
-fn oldPath(ctx: *Ctx) anyerror!wing.Redirect {
+fn oldPath(ctx: *Ctx) anyerror!wing.respond.Redirect {
     _ = ctx;
     return .{ .location = "/new-path" };
 }
@@ -110,7 +138,7 @@ fn login(ctx: *Ctx) anyerror![]const u8 {
 
 const Prefs = struct { theme: []const u8 = "light", count: u32 = 0 };
 
-fn prefs(ctx: *Ctx, c: wing.Cookies(Prefs)) anyerror![]const u8 {
+fn prefs(ctx: *Ctx, c: wing.extract.Cookies(Prefs)) anyerror![]const u8 {
     return std.fmt.allocPrint(ctx.arena, "theme={s} count={d}", .{ c.value.theme, c.value.count });
 }
 
@@ -145,6 +173,9 @@ fn buildRouter(gpa: std.mem.Allocator) !wing.Router(State) {
     try r.get("/", rawRoot);
     try r.get("/search", search);
     try r.post("/form-login", formLogin);
+    try r.get("/client-info", headersEcho);
+    try r.post("/echo-bytes", bytesEcho);
+    try r.post("/upload", upload);
     try r.get("/boom", boom);
     try r.get("/old-path", oldPath);
     try r.get("/request-id", echoRequestId);
@@ -217,7 +248,10 @@ test "integration: Json body extractor + Created with location" {
     try h.init(std.testing.allocator);
     defer h.deinit();
 
-    var res = try h.tc.post("/api/v1/users", .{ .body = "{\"name\":\"grace\"}" });
+    var res = try h.tc.post("/api/v1/users", .{
+        .headers = &.{.{ .name = "content-type", .value = "application/json" }},
+        .body = "{\"name\":\"grace\"}",
+    });
     defer res.deinit();
     try std.testing.expectEqual(.created, res.status);
     try std.testing.expectEqualStrings("/api/v1/users/1", res.header("location").?);
@@ -232,9 +266,41 @@ test "integration: malformed Json body maps to 400 via recover" {
     try h.init(std.testing.allocator);
     defer h.deinit();
 
-    var res = try h.tc.post("/api/v1/users", .{ .body = "not json" });
+    var res = try h.tc.post("/api/v1/users", .{
+        .headers = &.{.{ .name = "content-type", .value = "application/json" }},
+        .body = "not json",
+    });
     defer res.deinit();
     try std.testing.expectEqual(.bad_request, res.status);
+}
+
+test "integration: Json body without json content-type maps to 415" {
+    const rt = try zio.Runtime.init(std.testing.allocator, .{});
+    defer rt.deinit();
+    var h: Harness = undefined;
+    try h.init(std.testing.allocator);
+    defer h.deinit();
+
+    // Missing content-type entirely.
+    var res = try h.tc.post("/api/v1/users", .{ .body = "{\"name\":\"grace\"}" });
+    defer res.deinit();
+    try std.testing.expectEqual(.unsupported_media_type, res.status);
+
+    // Wrong media type.
+    var res2 = try h.tc.post("/api/v1/users", .{
+        .headers = &.{.{ .name = "content-type", .value = "text/plain" }},
+        .body = "{\"name\":\"grace\"}",
+    });
+    defer res2.deinit();
+    try std.testing.expectEqual(.unsupported_media_type, res2.status);
+
+    // +json structured-syntax suffix is accepted (RFC 6839).
+    var res3 = try h.tc.post("/api/v1/users", .{
+        .headers = &.{.{ .name = "content-type", .value = "application/vnd.api+json" }},
+        .body = "{\"name\":\"grace\"}",
+    });
+    defer res3.deinit();
+    try std.testing.expectEqual(.created, res3.status);
 }
 
 test "integration: Form body extractor parses urlencoded fields" {
@@ -265,17 +331,17 @@ test "integration: Form body extractor parses urlencoded fields" {
     try std.testing.expectEqualStrings("user=grace remember=false", res2.body);
 }
 
-test "integration: Form rejects wrong content-type and missing fields with 400" {
+test "integration: Form rejects wrong content-type with 415, missing fields with 400" {
     const rt = try zio.Runtime.init(std.testing.allocator, .{});
     defer rt.deinit();
     var h: Harness = undefined;
     try h.init(std.testing.allocator);
     defer h.deinit();
 
-    // No / wrong content-type → InvalidFormBody → 400.
+    // No / wrong content-type → UnsupportedMediaType → 415.
     var res = try h.tc.post("/form-login", .{ .body = "user=ada" });
     defer res.deinit();
-    try std.testing.expectEqual(.bad_request, res.status);
+    try std.testing.expectEqual(.unsupported_media_type, res.status);
 
     // Correct content-type but the required `user` field is absent → 400.
     var res2 = try h.tc.post("/form-login", .{
@@ -284,6 +350,115 @@ test "integration: Form rejects wrong content-type and missing fields with 400" 
     });
     defer res2.deinit();
     try std.testing.expectEqual(.bad_request, res2.status);
+}
+
+test "integration: Headers extractor binds, defaults, and rejects" {
+    const rt = try zio.Runtime.init(std.testing.allocator, .{});
+    defer rt.deinit();
+    var h: Harness = undefined;
+    try h.init(std.testing.allocator);
+    defer h.deinit();
+
+    // All headers present; field-name → header-name mapping (`_` → `-`),
+    // sent value overrides the field default.
+    var res = try h.tc.get("/client-info", .{
+        .headers = &.{
+            .{ .name = "x-client-version", .value = "3" },
+            .{ .name = "user-agent", .value = "wing-test" },
+            .{ .name = "x-retries", .value = "9" },
+        },
+    });
+    defer res.deinit();
+    try std.testing.expectEqual(.ok, res.status);
+    try std.testing.expectEqualStrings("v=3 ua=wing-test r=9", res.body);
+
+    // Optional header absent → null; defaulted header absent → default.
+    var res2 = try h.tc.get("/client-info", .{
+        .headers = &.{.{ .name = "x-client-version", .value = "1" }},
+    });
+    defer res2.deinit();
+    try std.testing.expectEqualStrings("v=1 ua=none r=7", res2.body);
+
+    // Required header missing → 400.
+    var res3 = try h.tc.get("/client-info", .{});
+    defer res3.deinit();
+    try std.testing.expectEqual(.bad_request, res3.status);
+
+    // Present but unparsable as u32 → 400.
+    var res4 = try h.tc.get("/client-info", .{
+        .headers = &.{.{ .name = "x-client-version", .value = "abc" }},
+    });
+    defer res4.deinit();
+    try std.testing.expectEqual(.bad_request, res4.status);
+}
+
+test "integration: Bytes extractor hands the raw body to the handler" {
+    const rt = try zio.Runtime.init(std.testing.allocator, .{});
+    defer rt.deinit();
+    var h: Harness = undefined;
+    try h.init(std.testing.allocator);
+    defer h.deinit();
+
+    // No content-type requirement: any bytes pass through untouched.
+    var res = try h.tc.post("/echo-bytes", .{ .body = "raw \x01 payload" });
+    defer res.deinit();
+    try std.testing.expectEqual(.ok, res.status);
+    try std.testing.expectEqualStrings("len=13 body=raw \x01 payload", res.body);
+
+    // Empty body is valid raw input.
+    var res2 = try h.tc.post("/echo-bytes", .{});
+    defer res2.deinit();
+    try std.testing.expectEqualStrings("len=0 body=", res2.body);
+}
+
+test "integration: Multipart extractor parses file uploads" {
+    const rt = try zio.Runtime.init(std.testing.allocator, .{});
+    defer rt.deinit();
+    var h: Harness = undefined;
+    try h.init(std.testing.allocator);
+    defer h.deinit();
+
+    const body = "--BOUND\r\n" ++
+        "content-disposition: form-data; name=\"note\"\r\n" ++
+        "\r\n" ++
+        "hi\r\n" ++
+        "--BOUND\r\n" ++
+        "content-disposition: form-data; name=\"file\"; filename=\"a.txt\"\r\n" ++
+        "content-type: text/plain\r\n" ++
+        "\r\n" ++
+        "hello world\r\n" ++
+        "--BOUND--\r\n";
+    var res = try h.tc.post("/upload", .{
+        .headers = &.{.{ .name = "content-type", .value = "multipart/form-data; boundary=BOUND" }},
+        .body = body,
+    });
+    defer res.deinit();
+    try std.testing.expectEqual(.ok, res.status);
+    try std.testing.expectEqualStrings("file=a.txt type=text/plain len=11 note=hi", res.body);
+
+    // Wrong media type → 415.
+    var res2 = try h.tc.post("/upload", .{
+        .headers = &.{.{ .name = "content-type", .value = "application/json" }},
+        .body = "{}",
+    });
+    defer res2.deinit();
+    try std.testing.expectEqual(.unsupported_media_type, res2.status);
+
+    // Right media type, missing boundary → 400.
+    var res3 = try h.tc.post("/upload", .{
+        .headers = &.{.{ .name = "content-type", .value = "multipart/form-data" }},
+        .body = body,
+    });
+    defer res3.deinit();
+    try std.testing.expectEqual(.bad_request, res3.status);
+
+    // Malformed framing (no close delimiter) → 400.
+    var res4 = try h.tc.post("/upload", .{
+        .headers = &.{.{ .name = "content-type", .value = "multipart/form-data; boundary=BOUND" }},
+        .body = "--BOUND\r\ncontent-disposition: form-data; name=\"x\"\r\n\r\nv",
+    });
+    defer res4.deinit();
+    try std.testing.expectEqual(.bad_request, res4.status);
 }
 
 test "integration: oversized chunked body maps to 413, within-limit parses" {

@@ -140,13 +140,13 @@ try router.get("/admin/users", listUsers, .{ .auth = .{ .role = "admin" } });
 fn createUser(
     ctx: *Ctx,
     db: *Db,                          // State 子状态投影（§8）
-    q: wing.Query(Pagination),        // fromRequestParts
-    body: wing.Json(CreateUserReq),   // fromRequest — 必须居末
-) !wing.Created(User) { ... }
+    q: wing.extract.Query(Pagination),        // fromRequestParts
+    body: wing.extract.Json(CreateUserReq),   // fromRequest — 必须居末
+) !wing.respond.Created(User) { ... }
 ```
 
 - `Router.register` 在 comptime 遍历 `@typeInfo(handler).@"fn".params`，按参数类型生成提取代码（路径参数 parse、query 解码、JSON body 反序列化），全部静态展开
-- 响应侧对称：返回类型实现 `toResponse(ctx)` 即可（`wing.Json(T)`、`wing.Created(T)`、`wing.Redirect`、裸 `[]const u8`、`void`）；error set → 状态码映射表可由用户 comptime 覆盖
+- 响应侧对称：返回类型实现 `toResponse(ctx)` 即可（`wing.respond.Json(T)`、`wing.respond.Created(T)`、`wing.respond.Redirect`、裸 `[]const u8`、`void`）；error set → 状态码映射表可由用户 comptime 覆盖
 - 所有 handler 最终包装成统一 thunk `*const fn (*anyopaque) anyerror!void` 存入路由树——动态性收敛在这一个函数指针上，绑定逻辑零成本
 - axum 用 trait + 泛型 impl 体操实现这套规则，报错信息是出名的天书；comptime 版本在注册点直接给出"第 3 个参数 X 消费 body，但其后还有参数 Y"级别的人话错误——**DX 反超参照系**
 

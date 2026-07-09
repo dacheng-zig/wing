@@ -1,7 +1,7 @@
 //! Scalar field parsing shared by the struct-binding extractors
-//! (Query/Path/Cookies). One decode rule for every typed binder so they stay
-//! consistent: integers, floats, bool, enums, `[]const u8`, optionals
-//! thereof — plus any struct declaring the `fromScalar` convention.
+//! (Query/Path/Headers/Cookies). One decode rule for every typed binder so
+//! they stay consistent: integers, floats, bool, enums, `[]const u8`,
+//! optionals thereof — plus any struct declaring the `fromScalar` convention.
 //! Operates on an already-decoded string; transport decoding (url, cookie)
 //! is the caller's job.
 
@@ -32,7 +32,7 @@ pub fn parseScalar(comptime T: type, raw: []const u8) !T {
 }
 
 pub fn unsupportedScalar(comptime T: type) noreturn {
-    @compileError("wing: unsupported Query/Path/Cookies field type " ++ @typeName(T) ++
+    @compileError("wing: unsupported Query/Path/Headers/Cookies field type " ++ @typeName(T) ++
         " — supported: integers, floats, bool, enums, []const u8, optionals thereof, " ++
         "and structs declaring `pub fn fromScalar(raw: []const u8) !T`");
 }

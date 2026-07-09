@@ -1,16 +1,17 @@
 //! Cookie component: strongly-typed Set-Cookie assembly and zero-copy request
 //! Cookie reading, grounded in RFC 6265 / 6265bis.
 //!
-//! Three layers, smallest surface that covers the use cases:
-//!   - `Cookie`      — a Set-Cookie directive (name=value + attributes) with a
-//!                     secure-by-default baseline. `serialize` writes the header
-//!                     value into a caller-supplied writer; `validate` enforces
-//!                     the spec invariants (token name, cookie-octet value,
-//!                     `__Host-`/`__Secure-` prefixes, `SameSite=None`⇒Secure).
-//!   - `View`        — a lazy, allocation-free reader over a request `Cookie`
-//!                     header. Slices borrow the header; lifetime is the request.
-//!   - `Cookies(T)`  — a typed extractor that binds named cookies into the
-//!                     fields of `T` by name, mirroring `Query(T)`/`Path(T)`.
+//! Two layers, smallest surface that covers the use cases:
+//!   - `Cookie` — a Set-Cookie directive (name=value + attributes) with a
+//!                secure-by-default baseline. `serialize` writes the header
+//!                value into a caller-supplied writer; `validate` enforces
+//!                the spec invariants (token name, cookie-octet value,
+//!                `__Host-`/`__Secure-` prefixes, `SameSite=None`⇒Secure).
+//!   - `View`   — a lazy, allocation-free reader over a request `Cookie`
+//!                header. Slices borrow the header; lifetime is the request.
+//!
+//! The typed `Cookies(T)` extractor builds on `View` and lives with the
+//! other extractors in `extract/cookies.zig`.
 //!
 //! Write side is strict (malformed cookies are rejected with an error, never
 //! silently dropped); read side is lenient (malformed segments are skipped).
@@ -18,7 +19,6 @@
 //! component layered on top of this primitive.
 
 const std = @import("std");
-const scalar = @import("scalar.zig");
 
 pub const SameSite = enum { strict, lax, none };
 
@@ -35,10 +35,6 @@ pub const CookieError = error{
     /// `SameSite=None` (or `Partitioned`) was set without `Secure`.
     InsecureCookie,
 };
-
-/// Raised by `Cookies(T)` when a required cookie is absent or unparsable.
-/// Folded into the framework-wide `wing.ExtractError` aggregate.
-pub const ExtractError = error{ MissingCookie, InvalidCookie };
 
 /// A Set-Cookie directive. Construct with a struct literal; defaults are the
 /// modern baseline (session cookie, no attributes). RFC 6265bis note: when both
@@ -164,35 +160,6 @@ pub const View = struct {
         }
     };
 };
-
-/// Typed extractor: binds request cookies into the fields of `T` by field name,
-/// mirroring `Query(T)`/`Path(T)`. Field types: integers, floats, bool, enums,
-/// `[]const u8`, optionals thereof. Fields with a default or an optional type
-/// are optional in the request; others raise `error.MissingCookie`. Cookie
-/// values are opaque bytes — they are bound verbatim, not percent-decoded.
-pub fn Cookies(comptime T: type) type {
-    return struct {
-        value: T,
-
-        pub fn fromRequestParts(ctx: anytype) !@This() {
-            const view = View.init(ctx.req.header("cookie") orelse "");
-            var value: T = undefined;
-            inline for (@typeInfo(T).@"struct".fields) |f| {
-                if (view.get(f.name)) |raw| {
-                    @field(value, f.name) = scalar.parseScalar(f.type, raw) catch
-                        return error.InvalidCookie;
-                } else if (f.defaultValue()) |d| {
-                    @field(value, f.name) = d;
-                } else if (@typeInfo(f.type) == .optional) {
-                    @field(value, f.name) = null;
-                } else {
-                    return error.MissingCookie;
-                }
-            }
-            return .{ .value = value };
-        }
-    };
-}
 
 // ── Byte-class validation (RFC 9110 token, RFC 6265 cookie-octet) ─────────
 

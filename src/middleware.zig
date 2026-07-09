@@ -101,8 +101,9 @@ pub fn recoverWith(comptime mapper: fn (anyerror) talon.http.Status) type {
     };
 }
 
-/// Error boundary with the default mapping (extract errors → 400, oversized
-/// body → 413, NotFound → 404, anything else → 500).
+/// Error boundary with the default mapping (extract errors → 400, wrong
+/// Content-Type → 415, oversized body → 413, NotFound → 404, anything
+/// else → 500).
 pub const recover = recoverWith(defaultErrorStatus);
 
 pub fn defaultErrorStatus(err: anyerror) talon.http.Status {
@@ -111,13 +112,18 @@ pub fn defaultErrorStatus(err: anyerror) talon.http.Status {
         error.InvalidQueryParam,
         error.MissingPathParam,
         error.InvalidPathParam,
+        error.MissingHeader,
+        error.InvalidHeader,
         error.InvalidJsonBody,
         error.InvalidFormBody,
         error.MissingFormField,
         error.InvalidFormField,
+        error.InvalidBody,
+        error.InvalidMultipartBody,
         error.MissingCookie,
         error.InvalidCookie,
         => .bad_request,
+        error.UnsupportedMediaType => .unsupported_media_type,
         error.PayloadTooLarge => .payload_too_large,
         error.NotFound => .not_found,
         error.Unauthorized => .unauthorized,

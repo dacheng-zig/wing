@@ -61,8 +61,8 @@ const User = struct { id: u64, name: []const u8 };
 fn getUser(
     ctx: *Ctx,
     db: *Db,
-    path: wing.Path(struct { id: u64 }),
-) anyerror!wing.Json(User) {
+    path: wing.extract.Path(struct { id: u64 }),
+) anyerror!wing.respond.Json(User) {
     _ = ctx;
     db.reads += 1;
     return .{ .value = .{ .id = path.value.id, .name = "ada" } };
