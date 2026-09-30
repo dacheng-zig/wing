@@ -6,8 +6,8 @@
     .dependencies = .{
         // Pinned to the talon repository commit used by this project.
         .talon = .{
-            .url = "https://codeload.github.com/dacheng-zig/talon/tar.gz/03eaf14b7de10ed0934723cdb798f7870bc935eb",
-            .hash = "talon-0.1.0-2ZGSTdR3CQC-Y91wnGBEYmHRzcCKWnSNl461aMV2N4yU",
+            .url = "https://codeload.github.com/dacheng-zig/talon/tar.gz/231648fa3971d81476fa0eacdb5bed8b0a9bbf2a",
+            .hash = "talon-0.1.0-2ZGSTbN3CQA57gCqKt0-KqVtlM1mUwQ05PIR8x0gON7o",
         },
     },
     .paths = .{
